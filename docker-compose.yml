@@ -1,0 +1,180 @@
+# Todo el EscapeRoom C15 en local, detras del gateway (http://localhost:8080, lo mismo que usa el front con Vite).
+# Los repos de los servicios deben estar clonados al lado de este (../c15-broker, ../c15-salas, ...).
+#   docker compose up -d --build        levantar (la primera vez tarda: compila los 5 proyectos)
+#   docker compose down                 bajar (los datos de Postgres quedan en el volumen)
+# Grafana (trazas y logs): http://localhost:3000   Consola de RabbitMQ: http://localhost:15672
+
+# Lo que comparten los 4 servicios: Auth0, Kafka, el relay STOMP a RabbitMQ, Redis y la observabilidad
+x-servicio: &servicio
+  restart: unless-stopped
+  depends_on: &dependencias
+    kafka:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  environment: &entorno
+    AUTH0_ISSUER: ${AUTH0_ISSUER:-https://escaperoomc15.us.auth0.com/}
+    AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.escaperoomc15}
+    EVENTOS_KAFKA: "true"
+    KAFKA_SERVIDORES: kafka:9092
+    STOMP_RELAY: "true"
+    STOMP_HOST: rabbitmq
+    STOMP_USUARIO: ${RABBIT_USUARIO}
+    STOMP_CLAVE: ${RABBIT_CLAVE}
+    ESTADO_REDIS: "true"
+    REDIS_HOST: redis
+    REDIS_CLAVE: ${REDIS_CLAVE}
+    SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+    OTEL_ACTIVO: "true"
+    OTEL_TRACES_URL: http://observabilidad:4318/v1/traces
+    OTEL_LOGS_URL: http://observabilidad:4318/v1/logs
+
+# Los que ademas tienen base de datos (una por servicio, en el mismo Postgres)
+x-con-base: &con-base
+  <<: *servicio
+  depends_on:
+    <<: *dependencias
+    db:
+      condition: service_healthy
+
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - broker
+      - salas
+      - gameplay
+      - social
+    environment:
+      AUTH0_ISSUER: ${AUTH0_ISSUER:-https://escaperoomc15.us.auth0.com/}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-https://api.escaperoomc15}
+      BROKER_URL: http://broker:8080
+      SALAS_URL: http://salas:8080
+      GAMEPLAY_URL: http://gameplay:8080
+      SOCIAL_URL: http://social:8080
+      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:5173}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      OTEL_ACTIVO: "true"
+      OTEL_TRACES_URL: http://observabilidad:4318/v1/traces
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+
+  broker:
+    <<: *servicio
+    build: ../c15-broker
+
+  salas:
+    <<: *con-base
+    build: ../c15-salas
+    environment:
+      <<: *entorno
+      DB_HOST: db
+      DB_NAME: c15_salas
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      C15_SALAS_BARRIDO: ${SALAS_BARRIDO:-60s}
+
+  gameplay:
+    <<: *con-base
+    build: ../c15-gameplay
+    environment:
+      <<: *entorno
+      DB_HOST: db
+      DB_NAME: c15_gameplay
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      RETO_DURACION: ${RETO_DURACION:-25s}
+
+  social:
+    <<: *con-base
+    build: ../c15-social
+    environment:
+      <<: *entorno
+      DB_HOST: db
+      DB_NAME: c15_social
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      # El chat de la sala de espera le pregunta a salas
+      SALAS_URL: http://salas:8080
+
+  # Un solo Postgres con una base por servicio (las crea docker/postgres/crear-bases.sh la primera vez)
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: c15
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./docker/postgres:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${DB_HOST_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d c15_social"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Eventos entre servicios (en Azure: Event Hubs con la API de Kafka). Un nodo KRaft; los eventos se guardan un dia
+  kafka:
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 24
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # Topics STOMP: todos los servicios publican aqui y el broker reparte a los jugadores (plugin STOMP en 61613)
+  rabbitmq:
+    image: rabbitmq:4.3.6-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USUARIO}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_CLAVE}
+    volumes:
+      - ./docker/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    ports:
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # Estado vivo compartido entre replicas; todo caduca en minutos (sin disco)
+  redis:
+    image: redis:8.8.2-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_CLAVE}", "--save", "", "--appendonly", "no"]
+    environment:
+      REDIS_CLAVE: ${REDIS_CLAVE}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_CLAVE\" --no-auth-warning ping | grep PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Grafana con Tempo (trazas) y Loki (logs), solo para desarrollo
+  observabilidad:
+    image: grafana/otel-lgtm:0.39.0
+    # Si arranca mientras se compila todo puede no alcanzar a estar listo: se reintenta solo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  db-data:

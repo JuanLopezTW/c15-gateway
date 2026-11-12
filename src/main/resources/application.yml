@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: c15-gateway
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Proveedor de identidad (Auth0): no son secretos
+          issuer-uri: ${AUTH0_ISSUER:https://escaperoomc15.us.auth0.com/}
+          audiences: ${AUTH0_AUDIENCE:https://api.escaperoomc15}
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Si un servicio no responde a tiempo, 504 en vez de dejar al jugador esperando
+          httpclient:
+            connect-timeout: 3000
+            response-timeout: 15s
+          routes:
+            # El WebSocket de todo el sistema (STOMP): el gateway pasa el Upgrade y queda como tunel
+            - id: broker
+              uri: ${BROKER_URL:http://localhost:8081}
+              predicates:
+                - Path=/ws/**
+            - id: salas
+              uri: ${SALAS_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/salas/**,/api/equipos/**
+            - id: gameplay
+              uri: ${GAMEPLAY_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/partidas/**,/dev/partidas/**
+            - id: social
+              uri: ${SOCIAL_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/perfil/**,/api/usuarios/**,/api/chat/**,/api/estadisticas/**
+
+server:
+  port: ${PORT:8080}
+
+c15:
+  cors:
+    # Desde donde puede llamar el front (separados por coma): Vite en local y la Static Web App en Azure
+    origenes: ${CORS_ORIGENES:http://localhost:5173}
+
+# Logs en JSON salvo con el perfil "local"; el traceId lo agrega Micrometer Tracing
+logging:
+  structured:
+    format:
+      console: ecs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_TRACES_URL:http://localhost:4318/v1/traces}
+      export:
+        enabled: ${OTEL_ACTIVO:false}

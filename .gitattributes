@@ -1,0 +1,2 @@
+# Los scripts que corren dentro de los contenedores necesitan saltos de linea de Linux
+*.sh text eol=lf
