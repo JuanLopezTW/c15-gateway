@@ -91,6 +91,7 @@ class GatewayFlujoTest {
         when(tokens.decode(anyString())).thenAnswer(i -> "token-falso".equals(i.getArgument(0))
                 ? Mono.error(new BadJwtException("firma invalida"))
                 : Mono.just(Jwt.withTokenValue(i.getArgument(0)).header("alg", "RS256").subject("auth0|ana")
+                .claim("https://api.escaperoomc15/roles", "token-admin".equals(i.getArgument(0)) ? List.of("admin") : List.of())
                 .issuedAt(Instant.EPOCH).expiresAt(Instant.parse("2999-01-01T00:00:00Z")).claims(c -> c.putAll(Map.of("aud", "x"))).build()));
     }
 
@@ -100,7 +101,6 @@ class GatewayFlujoTest {
             "/api/salas/s1/listo, salas",
             "/api/equipos/e1/miembros, salas",
             "/api/partidas/m1/cronometro, gameplay",
-            "/dev/partidas/m1/inicio, gameplay",
             "/api/perfil, social",
             "/api/usuarios, social",
             "/api/chat/global, social",
@@ -110,6 +110,20 @@ class GatewayFlujoTest {
         gateway.get().uri(ruta).header(HttpHeaders.AUTHORIZATION, "Bearer token-ana").exchange()
                 .expectStatus().isOk()
                 .expectBody(String.class).isEqualTo(servicio + " GET " + ruta + " Bearer token-ana");
+    }
+
+    @Test
+    void lasFuncionesDeAdministracionSoloLlegaConElRolAdmin() {
+        int antes = LLEGADAS.get();
+        gateway.get().uri("/dev/partidas/m1/inicio").header(HttpHeaders.AUTHORIZATION, "Bearer token-ana").exchange()
+                .expectStatus().isForbidden();
+        gateway.get().uri("/api/admin/resumen").header(HttpHeaders.AUTHORIZATION, "Bearer token-ana").exchange()
+                .expectStatus().isForbidden();
+        org.junit.jupiter.api.Assertions.assertEquals(antes, LLEGADAS.get(), "el jugador ni llega al servicio");
+
+        gateway.get().uri("/dev/partidas/m1/inicio").header(HttpHeaders.AUTHORIZATION, "Bearer token-admin").exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class).isEqualTo("gameplay GET /dev/partidas/m1/inicio Bearer token-admin");
     }
 
     @Test
