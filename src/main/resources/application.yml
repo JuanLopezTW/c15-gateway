@@ -33,7 +33,7 @@ spring:
             - id: social
               uri: ${SOCIAL_URL:http://localhost:8084}
               predicates:
-                - Path=/api/perfil/**,/api/usuarios/**,/api/chat/**,/api/estadisticas/**
+                - Path=/api/perfil/**,/api/usuarios/**,/api/chat/**,/api/estadisticas/**,/api/admin/**
 
 server:
   port: ${PORT:8080}

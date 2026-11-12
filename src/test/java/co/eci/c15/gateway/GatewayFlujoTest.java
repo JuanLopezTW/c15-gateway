@@ -124,6 +124,9 @@ class GatewayFlujoTest {
         gateway.get().uri("/dev/partidas/m1/inicio").header(HttpHeaders.AUTHORIZATION, "Bearer token-admin").exchange()
                 .expectStatus().isOk()
                 .expectBody(String.class).isEqualTo("gameplay GET /dev/partidas/m1/inicio Bearer token-admin");
+        gateway.get().uri("/api/admin/tablero/negocio").header(HttpHeaders.AUTHORIZATION, "Bearer token-admin").exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class).isEqualTo("social GET /api/admin/tablero/negocio Bearer token-admin");
     }
 
     @Test
