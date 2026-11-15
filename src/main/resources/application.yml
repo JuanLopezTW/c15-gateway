@@ -49,6 +49,14 @@ logging:
   structured:
     format:
       console: ecs
+    # Azure parte en trozos las lineas de mas de 16 KB y el JSON queda roto: un error con la pila entera de Spring
+    # no se podria buscar por su codigo (escenario O1). La pila empieza por la causa raiz y sin marcos repetidos.
+    json:
+      stacktrace:
+        root: first
+        include-common-frames: false
+        max-throwable-depth: 10
+        max-length: 6000
 
 management:
   endpoints:
