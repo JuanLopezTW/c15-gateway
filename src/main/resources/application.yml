@@ -17,11 +17,12 @@ spring:
             connect-timeout: 3000
             response-timeout: 15s
           routes:
-            # El WebSocket de todo el sistema (STOMP): el gateway pasa el Upgrade y queda como tunel
+            # El WebSocket de todo el sistema (STOMP): el gateway pasa el Upgrade y queda como tunel.
+            # /dev/caida/<servicio>: prueba de caida D1 (solo admin y solo si el servicio la tiene prendida)
             - id: broker
               uri: ${BROKER_URL:http://localhost:8081}
               predicates:
-                - Path=/ws/**
+                - Path=/ws/**,/dev/caida/c15-broker
             - id: salas
               uri: ${SALAS_URL:http://localhost:8082}
               predicates:
@@ -29,7 +30,7 @@ spring:
             - id: gameplay
               uri: ${GAMEPLAY_URL:http://localhost:8083}
               predicates:
-                - Path=/api/partidas/**,/dev/partidas/**
+                - Path=/api/partidas/**,/dev/partidas/**,/dev/caida/c15-gameplay
             - id: social
               uri: ${SOCIAL_URL:http://localhost:8084}
               predicates:

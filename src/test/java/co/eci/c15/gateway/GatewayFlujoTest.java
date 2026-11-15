@@ -129,6 +129,20 @@ class GatewayFlujoTest {
                 .expectBody(String.class).isEqualTo("social GET /api/admin/tablero/negocio Bearer token-admin");
     }
 
+    @ParameterizedTest
+    @CsvSource({"c15-broker, broker", "c15-gameplay, gameplay"})
+    void laPruebaDeCaidaVaAlServicioQueSeNombraYSoloLaUsaElAdmin(String nombre, String servicio) {
+        String ruta = "/dev/caida/" + nombre;
+        int antes = LLEGADAS.get();
+        gateway.post().uri(ruta).header(HttpHeaders.AUTHORIZATION, "Bearer token-ana").exchange()
+                .expectStatus().isForbidden();
+        org.junit.jupiter.api.Assertions.assertEquals(antes, LLEGADAS.get(), "un jugador no tumba nada");
+
+        gateway.post().uri(ruta).header(HttpHeaders.AUTHORIZATION, "Bearer token-admin").exchange()
+                .expectStatus().isOk()
+                .expectBody(String.class).isEqualTo(servicio + " POST " + ruta + " Bearer token-admin");
+    }
+
     @Test
     void conTokenSePuedeEscribirSinCsrf() {
         gateway.post().uri("/api/salas").header(HttpHeaders.AUTHORIZATION, "Bearer token-ana").bodyValue("{}").exchange()
