@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -12,6 +13,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
@@ -40,7 +42,7 @@ public class SeguridadConfig {
             @Value("${c15.seguridad.claim-roles:https://api.escaperoomc15/roles}") String claimRoles) {
         return http
                 .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf.requireCsrfProtectionMatcher(sinTokenBearer()))
+                .csrf(csrf -> csrf.requireCsrfProtectionMatcher(sinTokenBearer()).accessDeniedHandler(faltaAutenticarse()))
                 .authorizeExchange(a -> a
                         .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .pathMatchers("/api/version", "/ws/**", "/actuator/health").permitAll()
@@ -70,6 +72,18 @@ public class SeguridadConfig {
             String autorizacion = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
             boolean conBearer = autorizacion != null && autorizacion.startsWith("Bearer ");
             return cambia && !conBearer ? ServerWebExchangeMatcher.MatchResult.match() : ServerWebExchangeMatcher.MatchResult.notMatch();
+        };
+    }
+
+    /**
+     * Lo que CSRF frena aqui es siempre una peticion sin token (las que traen Bearer no pasan por CSRF): lo que le
+     * falta es autenticarse, asi que responde 401 como cualquier peticion sin token (escenario S1), no 403.
+     */
+    static ServerAccessDeniedHandler faltaAutenticarse() {
+        return (exchange, denegado) -> {
+            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            exchange.getResponse().getHeaders().set(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+            return exchange.getResponse().setComplete();
         };
     }
 

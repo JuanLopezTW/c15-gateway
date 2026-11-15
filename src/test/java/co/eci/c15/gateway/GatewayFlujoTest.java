@@ -157,8 +157,10 @@ class GatewayFlujoTest {
         gateway.get().uri("/api/salas").exchange().expectStatus().isUnauthorized();
         gateway.get().uri("/api/partidas/m1/mapa").header(HttpHeaders.AUTHORIZATION, "Bearer token-falso").exchange()
                 .expectStatus().isUnauthorized();
-        // Escribir sin token ni siquiera pasa CSRF
-        gateway.post().uri("/api/salas").bodyValue("{}").exchange().expectStatus().isForbidden();
+        // Escribir sin token: CSRF lo frena y responde 401 (le falta autenticarse), igual que cualquier peticion sin token
+        gateway.post().uri("/api/salas").bodyValue("{}").exchange().expectStatus().isUnauthorized()
+                .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
+        gateway.delete().uri("/api/salas/s1/jugadores/u1").exchange().expectStatus().isUnauthorized();
 
         org.junit.jupiter.api.Assertions.assertEquals(antes, LLEGADAS.get());
     }
